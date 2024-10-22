@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projet django Maps</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+     <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+        #map {
+            width: 100%;
+            height: 50%;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <h1>Sélectionnez deux lieux pour un itinéraire</h1>
+    <select id="place1">
+        {% for place in saved_places %}
+            <option value="{{ place.id }}">{{ place.address }}</option>
+        {% endfor %}
+    </select>
+
+    <select id="place2">
+        {% for place in saved_places %}
+            <option value="{{ place.id }}">{{ place.address }}</option>
+        {% endfor %}
+    </select>
+
+    <button onclick="getRoute()">Afficher l'itinéraire</button>
+
+    <script>
+        let currentMarker;
+        const map = L.map('map').setView([45.750000, 4.850000], 20);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        function formatAddress(data) {
+            let address = data.address;
+            let name = data.name || ''; // Récupère le nom du lieu s'il existe
+            let formattedAddress = '';
+
+            if (name) {
+                formattedAddress += `<b>${name}</b><br>`;
+            }
+
+            if (address.house_number) formattedAddress += address.house_number + ' ';
+            if (address.road) formattedAddress += address.road + ', ';
+            if (address.city) formattedAddress += address.city + ', ';
+            if (address.postcode) formattedAddress += address.postcode + ', ';
+            if (address.country) formattedAddress += address.country;
+
+            return formattedAddress;
+        }
+
+        function getAddress(lat, lon) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1`;
+
+            fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                const formatedAddress = formatAddress(data);
+                let address = formatedAddress;
+
+                if(formatedAddress.includes('<br>')){
+                    address = formatedAddress.split('<br>')[1];
+                }
+
+                if (currentMarker) {
+                    map.removeLayer(currentMarker);
+                }
+                currentMarker = L.marker([lat, lon]).addTo(map);
+
+                const popupContent = `
+                    ${formatedAddress}<br>
+                    <button onclick="saveLocation('${lat}', '${lon}', '${address}')">Enregistrer</button>
+                `;
+                currentMarker.bindPopup(popupContent).openPopup();
+            })
+            .catch(error => {
+                console.log('Erreur:', error);
+            });
+        }
+
+        map.on('click', function(e) {
+            const lat = e.latlng.lat;
+            const lon = e.latlng.lng;
+
+            getAddress(lat, lon);
+        });
+
+        function saveLocation(lat, lon, address) {
+            const url = '/save-location/';
+            // csrf token ?
+            fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: new URLSearchParams({
+                    'lat': lat,
+                    'lon': lon,
+                    'address': address
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    console.log('Location saved successfully!');
+                } else {
+                    console.log('Error saving location: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.log('Erreur:', error);
+                console.log('Une erreur est survenue.');
+            });
+
+        }
+
+        function getRoute() {
+            const place1_id = document.getElementById('place1').value;
+            const place2_id = document.getElementById('place2').value;
+
+
+            fetch(`/get-route/${place1_id}/${place2_id}/`)
+                .then(response => {
+        // Affichez la réponse brute pour déboguer
+        console.log(response);
+        return response.json(); // Ne pas traiter si la réponse n'est pas 200
+    })
+                .then(data => {
+                                            console.log(data)
+
+                    if (data.status === 'success') {
+                        
+                        const routeCoordinates = data.route.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]); // Inverser les coordonnées pour Leaflet
+                        const polyline = L.polyline(routeCoordinates, {color: 'blue'}).addTo(map);
+    
+                        // Zoomer sur l'itinéraire
+                        // map.fitBounds(polyline.getBounds());
+                    } else {
+                        alert('Erreur : ' + data.message);
+                    }
+                })
+                .catch(error => console.log('Erreur :', error));
+        }
+    </script>
+</body>
+</html>
